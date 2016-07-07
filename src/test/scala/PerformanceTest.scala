@@ -1,71 +1,106 @@
 package net.fosd.vgit
 
-import org.scalameter.DSL.measure
-import org.scalameter.DSL.performance
-import org.scalameter.Gen
-import org.scalameter.PerformanceTest
-import org.scalameter._
+//import org.scalameter.DSL.measure
+//import org.scalameter.DSL.performance
 
-class PerformanceTest extends PerformanceTest.Quickbenchmark {
+import de.fosd.typechef.conditional.Opt
+import de.fosd.typechef.featureexpr.{FeatureExpr, FeatureExprFactory}
+import edu.cmu.feature.vregex._
+import gnieh.regex._
+import org.scalameter.{Gen, PerformanceTest}
 
-    val text = """Et licet quocumque oculos flexeris feminas adfatim multas spectare cirratas, quibus, si nupsissent, per aetatem ter iam
-                 |nixus poterat suppetere liberorum, ad usque taedium pedibus pavimenta tergentes iactari volucriter gyris, dum exprimunt innumera
-                 |simulacra, quae finxere fabulae theatrales.%0A%0AHaec subinde Constantius audiens et quaedam referente Thalassio doctus, quem eum odisse
-                 |iam conpererat lege communi, scribens ad Caesarem blandius adiumenta paulatim illi subtraxit, sollicitari se simulans ne, uti est militare
-                 |otium fere tumultuosum, in eius perniciem conspiraret, solisque scholis iussit esse contentum palatinis et protectorum cum Scutariis et
-                 |Gentilibus, et mandabat Domitiano, ex comite largitionum, praefecto ut cum in Syriam venerit, Gallum, quem crebro acciverat, ad Italiam
-                 |properare blande hortaretur et verecunde.%0A%0ASed si ille hac tam eximia fortuna propter utilitatem rei publicae frui non properat, ut
-                 |omnia illa conficiat, quid ego, senator, facere debeo, quem, etiamsi ille aliud vellet, rei publicae consulere oporteret?%0AEt licet
-                 |quocumque oculos flexeris feminas adfatim multas spectare cirratas, quibus, si nupsissent, per aetatem ter iam nixus poterat suppetere
-                 |liberorum, ad usque taedium pedibus pavimenta tergentes iactari volucriter gyris, dum exprimunt innumera simulacra, quae finxere fabulae
-                 |theatrales.%0A%0AHaec subinde Constantius audiens et quaedam referente Thalassio doctus, quem eum odisse iam conpererat lege communi,
-                 |scribens ad Caesarem blandius adiumenta paulatim illi subtraxit, sollicitari se simulans ne, uti est militare otium fere tumultuosum, in
-                 |eius perniciem conspiraret, solisque scholis iussit esse contentum palatinis et protectorum cum Scutariis et Gentilibus, et mandabat
-                 |Domitiano, ex comite largitionum, praefecto ut cum in Syriam venerit, Gallum, quem crebro acciverat, ad Italiam properare blande
-                 |hortaretur et verecunde.%0A%0ASed si ille hac tam eximia fortuna propter utilitatem rei publicae frui non properat, ut omnia illa
-                 |conficiat, quid ego, senator, facere debeo, quem, etiamsi ille aliud vellet, rei publicae consulere oporteret?%0AEt licet quocumque oculos
-                 |flexeris feminas adfatim multas spectare cirratas, quibus, si nupsissent, per aetatem ter iam nixus poterat suppetere liberorum, ad usque
-                 |taedium pedibus pavimenta tergentes iactari volucriter gyris, dum exprimunt innumera simulacra, quae finxere fabulae theatrales.%0A%0AHaec
-                 |subinde Constantius audiens et quaedam referente Thalassio doctus, quem eum odisse iam conpererat lege communi, scribens ad Caesarem
-                 |blandius adiumenta paulatim illi subtraxit, sollicitari se simulans ne, uti est militare otium fere tumultuosum, in eius perniciem
-                 |conspiraret, solisque scholis iussit esse contentum palatinis et protectorum cum Scutariis et Gentilibus, et mandabat Domitiano, ex comite
-                 |largitionum, praefecto ut cum in Syriam venerit, Gallum, quem crebro acciverat, ad Italiam properare blande hortaretur et
-                 |verecunde.%0A%0ASed si ille hac tam eximia fortuna propter utilitatem rei publicae frui non properat, ut omnia illa conficiat, quid ego,
-                 |senator, facere debeo, quem, etiamsi ille aliud vellet, rei publicae consulere oporteret?%0A""".stripMargin.replace("\n", "")
+class ForkPerformanceTest extends PerformanceTest.Quickbenchmark {
 
-    val textGen = Gen.single("text")(text)
+//    FeatureExprFactory.setDefault(FeatureExprFactory.bdd)
 
-    val reGen =
-        for(re <- Gen.single("re")("([-A-Za-z0-9_.!~*'();/?:@&=+$,# ]|%[A-Fa-f0-9]{2})+".re))
-            yield {
-                // force evaluation to make it compile
-                re.isMatchedBy("")
-                re
+//    val gitProject = "test/.git"
+//    val file = "test2.c"
+
+            val gitProject = "c:/users/ckaestne/linux/.git"
+            val file = "kernel/fork.c"
+
+
+    val fileRevisions = GitHelper.getFileRevisions(gitProject, file)
+
+    val plainContents: List[String] = fileRevisions.map(x => x._2.getString(0, x._2.size(), false))
+
+    val lineTable = GitImport.genLineTable(gitProject, file)
+
+    val vcontent = lineTableToVString(lineTable)
+
+    def lineTableToVString(lineTable: LineTable): VString = {
+        def getCondition(revisionPositions: List[Int]): FeatureExpr =
+            (revisionPositions zip lineTable.commitIds).
+                filter(_._1 >= 0).
+                map(x => FeatureExprFactory.createDefinedExternal(x._2)).
+                foldRight(FeatureExprFactory.False)(_ or _)
+
+        val lines = for (l <- lineTable.lines)
+            yield ChoiceStr(getCondition(l.revisionPositions), l.text, "")
+        Concatenate(lines)
+    }
+
+    val uncompressedSize = plainContents.map(_.size).reduce(_ + _)
+    val compressedSize = vcontent.toVCharList.size
+    assert(plainContents.size == lineTable.commitIds.size)
+    println("commits: " + plainContents.size)
+    println("uncompressed size: " + uncompressedSize)
+    println("compressed size: " + compressedSize)
+    println("linear compression rate (reference): %.3f".format(1d - 1d / plainContents.size))
+    println("compression rate: %.3f".format(1d - compressedSize.toDouble / uncompressedSize.toDouble))
+
+    val vinput = vcontent.toVCharList
+    val vinputbruteforce = plainContents.map(AString(_).toVCharList)
+    val inputbruteforce = plainContents
+
+    val expressions: Gen[String] = Gen.enumeration("expression")("a", "aaaaaaaaa")
+    val expressionsR = (for (e <- expressions) yield (e.vre, e.re, e.r)).cached
+
+
+    //    val reGen =
+    //        for (re <- Gen.single("re")("([-A-Za-z0-9_.!~*'();/?:@&=+$,# ]|%[A-Fa-f0-9]{2})+".vre))
+    //            yield {
+    //                // force evaluation to make it compile
+    //                re.isMatchedBy("")
+    //                re
+    //            }
+    //
+    //    val inputs = Gen.tupled(textGen, reGen)
+
+    performance of "search for \"a\"" in {
+//        measure method "vregex - variational" in {
+//            using(expressionsR) in {
+//                _._1 isMatchedBy vinput
+//            }
+//        }
+        measure method "vregex - brute force" in {
+            using(expressionsR) in {
+                vinputbruteforce map _._1.isMatchedBy
             }
-
-    val inputs = Gen.tupled(textGen, reGen)
-
-    performance of "New regular expression" in {
-        measure method "findFirstIn" in {
-
-            using(textGen) in { t =>
-                val localRe = "([-A-Za-z0-9_.!~*'();/?:@&=+$,# ]|%[A-Fa-f0-9]{2})+".re
-
-                localRe.findFirstIn(t)
+        }
+        measure method "regex - brute force" in {
+            using(expressionsR) in {
+                inputbruteforce map _._2.isMatchedBy
             }
-
+        }
+        measure method "java.regex - brute force" in {
+            using(expressionsR) in {
+                inputbruteforce map _._3.findFirstIn
+            }
         }
     }
 
-    performance of "Reused regular expression" in {
-        measure method "findFirstIn" in {
 
-            using(inputs) in { case (t, re) =>
-                re.findFirstIn(t)
-            }
-
-        }
-    }
+    //
+    //    performance of "Reused regular expression" in {
+    //        measure method "findFirstIn" in {
+    //
+    //            using(inputs) in { case (t, re) =>
+    //                re.isMatchedBy(t)
+    //            }
+    //
+    //        }
+    //    }
 
 }
 
